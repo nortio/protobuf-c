@@ -11,9 +11,79 @@ cmake_policy(SET CMP0112 NEW)
 
 PROJECT(protobuf-c C CXX)
 
+#options
+option(BUILD_PROTOC "Build protoc-gen-c" ON)
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+option(BUILD_TESTS "Build tests" ON)
+else()
+option(BUILD_TESTS "Build tests" OFF)
+endif()
+
+INCLUDE(TestBigEndian)
+TEST_BIG_ENDIAN(WORDS_BIGENDIAN)
+
+include(GNUInstallDirs)
+
+set(PROTOBUF_C_TARGETS "protobuf-c")
+SET(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
+ADD_DEFINITIONS(-DPACKAGE_VERSION="${PACKAGE_VERSION}")
+ADD_DEFINITIONS(-DPACKAGE_STRING="${PACKAGE_STRING}")
+if (${WORDS_BIGENDIAN})
+	ADD_DEFINITIONS(-DWORDS_BIGENDIAN)
+endif()
+
 if (MSVC AND NOT BUILD_SHARED_LIBS)
 	SET(Protobuf_USE_STATIC_LIBS ON)
 endif (MSVC AND NOT BUILD_SHARED_LIBS)
+
+IF (MSVC AND BUILD_SHARED_LIBS)
+	ADD_DEFINITIONS(-DPROTOBUF_C_USE_SHARED_LIB)
+ENDIF (MSVC AND BUILD_SHARED_LIBS)
+
+get_filename_component(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR} PATH)
+SET(TEST_DIR ${MAIN_DIR}/t)
+
+MESSAGE(${MAIN_DIR})
+
+SET (PC_SOURCES
+        ${MAIN_DIR}/protobuf-c/protobuf-c.c
+        ${MAIN_DIR}/protobuf-c/protobuf-c.h)
+
+ADD_LIBRARY(protobuf-c ${PC_SOURCES})
+set_target_properties(protobuf-c PROPERTIES COMPILE_PDB_NAME protobuf-c)
+target_include_directories(protobuf-c
+  PUBLIC
+    $<BUILD_INTERFACE:${MAIN_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+IF (MSVC AND BUILD_SHARED_LIBS)
+	TARGET_COMPILE_DEFINITIONS(protobuf-c PRIVATE -DPROTOBUF_C_EXPORT)
+ENDIF (MSVC AND BUILD_SHARED_LIBS)
+
+INCLUDE_DIRECTORIES(${MAIN_DIR})
+INCLUDE_DIRECTORIES(${MAIN_DIR}/protobuf-c)
+
+if (MSVC AND NOT BUILD_SHARED_LIBS)
+	# In case we are building static libraries, link also the runtime library statically
+	# so that MSVCR*.DLL is not required at runtime.
+	# https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
+	# This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
+	# http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
+	foreach(flag_var
+		CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+		CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
+		CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE 
+		CMAKE_C_FLAGS_MINSIZEREL CMAKE_FLAGS_RELWITHDEBINFO)
+	  if(${flag_var} MATCHES "/MD")
+		string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
+	  endif(${flag_var} MATCHES "/MD")
+	endforeach(flag_var)
+endif (MSVC AND NOT BUILD_SHARED_LIBS)
+
+IF(BUILD_PROTOC)
+SET(CMAKE_CXX_STANDARD 17)
+SET(CMAKE_CXX_STANDARD_REQUIRED ON)
+SET(CMAKE_CXX_EXTENSIONS OFF)
 
 FIND_PACKAGE(Protobuf REQUIRED)
 file(REAL_PATH "${PROTOBUF_INCLUDE_DIR}" PROTOBUF_INCLUDE_DIR)
@@ -36,31 +106,6 @@ elseif(WIN32)
     set(protobuf_ABSL_USED_TARGETS $<TARGET_NAME_IF_EXISTS:absl::abseil_dll>)
 endif()
 
-#options
-option(BUILD_PROTOC "Build protoc-gen-c" ON)
-if(CMAKE_BUILD_TYPE MATCHES Debug)
-option(BUILD_TESTS "Build tests" ON)
-else()
-option(BUILD_TESTS "Build tests" OFF)
-endif()
-
-INCLUDE(TestBigEndian)
-TEST_BIG_ENDIAN(WORDS_BIGENDIAN)
-
-include(GNUInstallDirs)
-
-set(PROTOBUF_C_TARGETS "protobuf-c")
-SET(PACKAGE_STRING "${PACKAGE_NAME} ${PACKAGE_VERSION}")
-ADD_DEFINITIONS(-DPACKAGE_VERSION="${PACKAGE_VERSION}")
-ADD_DEFINITIONS(-DPACKAGE_STRING="${PACKAGE_STRING}")
-if (${WORDS_BIGENDIAN})
-	ADD_DEFINITIONS(-DWORDS_BIGENDIAN)
-endif()
-
-IF (MSVC AND BUILD_SHARED_LIBS)
-	ADD_DEFINITIONS(-DPROTOBUF_C_USE_SHARED_LIB)
-ENDIF (MSVC AND BUILD_SHARED_LIBS)
-
 if(MSVC)
   # using Visual Studio C++
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /wd4267 /wd4244")
@@ -73,53 +118,10 @@ if(MSVC)
 
 ENDIF()
 
-get_filename_component(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR} PATH)
-SET(TEST_DIR ${MAIN_DIR}/t)
-
-MESSAGE(${MAIN_DIR})
-
-SET (PC_SOURCES
-        ${MAIN_DIR}/protobuf-c/protobuf-c.c
-        ${MAIN_DIR}/protobuf-c/protobuf-c.h)
-
-ADD_LIBRARY(protobuf-c ${PC_SOURCES})
-set_target_properties(protobuf-c PROPERTIES COMPILE_PDB_NAME protobuf-c)
-target_include_directories(protobuf-c
-  PUBLIC
-    $<BUILD_INTERFACE:${MAIN_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-IF (MSVC AND BUILD_SHARED_LIBS)
-	TARGET_COMPILE_DEFINITIONS(protobuf-c PRIVATE -DPROTOBUF_C_EXPORT)
-ENDIF (MSVC AND BUILD_SHARED_LIBS)
 target_link_libraries(protobuf-c ${protobuf_ABSL_USED_TARGETS} ${protobuf_UTF8_USED_TARGETS})
 target_compile_features(protobuf-c PRIVATE cxx_std_17)
 
-INCLUDE_DIRECTORIES(${MAIN_DIR})
-INCLUDE_DIRECTORIES(${MAIN_DIR}/protobuf-c)
-
-IF(BUILD_PROTOC)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_BINARY_DIR}) # for generated files
-
-ENDIF()
-
-if (MSVC AND NOT BUILD_SHARED_LIBS)
-	# In case we are building static libraries, link also the runtime library statically
-	# so that MSVCR*.DLL is not required at runtime.
-	# https://msdn.microsoft.com/en-us/library/2kzt1wy3.aspx
-	# This is achieved by replacing msvc option /MD with /MT and /MDd with /MTd
-	# http://www.cmake.org/Wiki/CMake_FAQ#How_can_I_build_my_MSVC_application_with_a_static_runtime.3F
-	foreach(flag_var
-		CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-		CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO
-		CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE 
-		CMAKE_C_FLAGS_MINSIZEREL CMAKE_FLAGS_RELWITHDEBINFO)
-	  if(${flag_var} MATCHES "/MD")
-		string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-	  endif(${flag_var} MATCHES "/MD")
-	endforeach(flag_var)
-endif (MSVC AND NOT BUILD_SHARED_LIBS)
-
 if(WIN32)
     # Modify the environment to hint protoc where the plugin is
     # prepend to PATH because github host runners have abseil dll pre-installed.
@@ -140,11 +142,6 @@ else(WIN32)
     set(OS_PATH_VARIABLE "$<TARGET_FILE_DIR:protoc-gen-c>:${OS_PATH_VARIABLE}")
 
 endif(WIN32)
-
-IF(BUILD_PROTOC)
-SET(CMAKE_CXX_STANDARD 17)
-SET(CMAKE_CXX_STANDARD_REQUIRED ON)
-SET(CMAKE_CXX_EXTENSIONS OFF)
 
 add_custom_target(protoc-generated-files
        COMMAND ${CMAKE_COMMAND} -E env PATH="${OS_PATH_VARIABLE}" -- ${PROTOBUF_PROTOC_EXECUTABLE}
